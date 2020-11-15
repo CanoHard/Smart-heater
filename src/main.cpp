@@ -14,6 +14,8 @@
 #include <OneButton.h>
 #include <Chrono.h>
 
+
+//Made by Pablo Cano v1.0
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
 
 OneWire oneWire(TEMPPIN);
@@ -138,6 +140,8 @@ void HoldPower()
   }
 }
 
+
+//Network
 void connectToWifi()
 {
   Serial.println("Connecting to Wi-Fi...");
