@@ -5,7 +5,6 @@
 #include <AsyncMqttClient.h>
 #include "config.h"
 #include "main.h"
-#include <ArduinoOTA.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <Adafruit_GFX.h>
@@ -13,7 +12,7 @@
 #include <Wire.h>
 #include <OneButton.h>
 #include <Chrono.h>
-
+#include <CanoMqtt.h>
 
 //Made by Pablo Cano v1.0
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
@@ -21,12 +20,7 @@ Adafruit_SSD1306 display(128, 64, &Wire, -1);
 OneWire oneWire(TEMPPIN);
 DallasTemperature temp(&oneWire);
 
-AsyncMqttClient mqttClient;
-Ticker mqttReconnectTimer;
-
-WiFiEventHandler wifiConnectHandler;
-WiFiEventHandler wifiDisconnectHandler;
-Ticker wifiReconnectTimer;
+CanoMqtt mqttClient(WIFI_SSID, WIFI_PASSWORD, MQTT_HOST, MQTT_USER, MQTT_PASSWORD, NAME, STATUS_TOPIC, "offline");
 
 OneButton buttonplus(BUTTONIPIN, true);
 OneButton buttonminus(BUTTONDPIN, true);
@@ -140,74 +134,25 @@ void HoldPower()
   }
 }
 
-
 //Network
-void connectToWifi()
-{
-  Serial.println("Connecting to Wi-Fi...");
-  WiFi.hostname(NAME);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-}
 
-void onWifiConnect(const WiFiEventStationModeGotIP &event)
-{
-  Serial.println("Connected to Wi-Fi.");
-
-  connectToMqtt();
-}
-
-void onWifiDisconnect(const WiFiEventStationModeDisconnected &event)
-{
-  Serial.println("Disconnected from Wi-Fi.");
-  mqttReconnectTimer.detach(); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
-  wifiReconnectTimer.once(2, connectToWifi);
-}
-
-void connectToMqtt()
-{
-  Serial.println("Connecting to MQTT...");
-  mqttClient.connect();
-}
-
-void onMqttConnect(bool sessionPresent)
+void onMqttConnect()
 {
   Serial.println("Connected to MQTT.");
   Serial.print("Session present: ");
-  Serial.println(sessionPresent);
-  mqttClient.publish(STATUS_TOPIC, 0, true, "online");
+
+  mqttClient.Publish(STATUS_TOPIC, 0, true, "online");
   sendtemp.restart();
   sendData();
-  mqttClient.subscribe(mode_command_topic, 0);
-  mqttClient.subscribe(temperature_command_topic, 0);
-  mqttClient.subscribe(away_mode_command_topic, 0);
+  mqttClient.Subscribe(mode_command_topic, 0);
+  mqttClient.Subscribe(temperature_command_topic, 0);
+  mqttClient.Subscribe(away_mode_command_topic, 0);
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason)
 {
-  Serial.println("Disconnected from MQTT.");
-
-  if (WiFi.isConnected())
-  {
-    mqttReconnectTimer.once(2, connectToMqtt);
-  }
   sendtemp.restart();
   sendtemp.stop();
-}
-
-void onMqttSubscribe(uint16_t packetId, uint8_t qos)
-{
-  Serial.println("Subscribe acknowledged.");
-  Serial.print("  packetId: ");
-  Serial.println(packetId);
-  Serial.print("  qos: ");
-  Serial.println(qos);
-}
-
-void onMqttUnsubscribe(uint16_t packetId)
-{
-  Serial.println("Unsubscribe acknowledged.");
-  Serial.print("  packetId: ");
-  Serial.println(packetId);
 }
 
 void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total)
@@ -265,11 +210,45 @@ void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties 
   }
 }
 
-void onMqttPublish(uint16_t packetId)
-{
-  Serial.println("Publish acknowledged.");
-  Serial.print("  packetId: ");
-  Serial.println(packetId);
+void onOtaevent(CanoMqtt::OtaEvent e, int p){
+  switch (e)
+  {
+  case CanoMqtt::OTA_ONSTART:
+    display.ssd1306_command(SSD1306_DISPLAYON);
+    break;
+
+  case CanoMqtt::OTA_ONPROGRESS:
+    display.clearDisplay();
+    display.setTextSize(1);  // Normal 1:1 pixel scale
+    display.setCursor(0, 0); // Start at top-left corner
+    display.println("     Actualizando");
+    display.setTextSize(3);   // Normal 1:1 pixel scale
+    display.setCursor(0, 20); // Start at top-left corner
+    display.print("  ");
+    display.print(p);
+    display.print("%");
+    display.display();
+    break;
+
+  case CanoMqtt::OTA_ONEND:
+    display.clearDisplay();
+    display.setTextSize(2);   // Normal 1:1 pixel scale
+    display.setCursor(0, 16); // Start at top-left corner
+    display.print("Instalando");
+    display.display();  
+    break;
+
+  case CanoMqtt::OTA_ONERROR:
+    display.clearDisplay();
+    display.setTextSize(2);   // Normal 1:1 pixel scale
+    display.setCursor(0, 16); // Start at top-left corner
+    display.print("ERROR");
+    display.display();  
+    break;         
+  
+  default:
+    break;
+  }
 }
 
 void setup()
@@ -287,70 +266,17 @@ void setup()
   display.display();
   Serial.println("Booting");
 
+  WiFi.mode(WIFI_STA);
   WiFi.hostname(NAME);
 
-  wifiConnectHandler = WiFi.onStationModeGotIP(onWifiConnect);
-  wifiDisconnectHandler = WiFi.onStationModeDisconnected(onWifiDisconnect);
+  mqttClient.SetOnMqttConnect(onMqttConnect);
+  mqttClient.SetOnMqttMessage(onMqttMessage);
+  mqttClient.SetOnOtaEvent(onOtaevent);
+  mqttClient.Init();
 
-  mqttClient.setCredentials(MQTT_USER, MQTT_PASSWORD);
-  mqttClient.setClientId(NAME);
-  mqttClient.setCleanSession(true);
-  mqttClient.onConnect(onMqttConnect);
-  mqttClient.onDisconnect(onMqttDisconnect);
-  mqttClient.onSubscribe(onMqttSubscribe);
-  mqttClient.onUnsubscribe(onMqttUnsubscribe);
-  mqttClient.onMessage(onMqttMessage);
-  mqttClient.onPublish(onMqttPublish);
-  mqttClient.setServer(MQTT_HOST, MQTT_PORT);
-  mqttClient.setWill(STATUS_TOPIC, 0, true, "offline");
-
-  connectToWifi();
-
-  ArduinoOTA.setHostname(NAME);
-
-  // No authentication by default
-
-  ArduinoOTA.onStart([]() {
-    String type;
-    if (ArduinoOTA.getCommand() == U_FLASH)
-      type = "sketch";
-    else // U_SPIFFS
-      type = "filesystem";
-    display.ssd1306_command(SSD1306_DISPLAYON);
-
-    // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
-  });
-  ArduinoOTA.onEnd([]() {
-    display.clearDisplay();
-    display.setTextSize(2);   // Normal 1:1 pixel scale
-    display.setCursor(0, 16); // Start at top-left corner
-    display.print("Instalando");
-    display.display();
-  });
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    display.clearDisplay();
-    display.setTextSize(1);  // Normal 1:1 pixel scale
-    display.setCursor(0, 0); // Start at top-left corner
-    display.println("     Actualizando");
-    display.setTextSize(3);   // Normal 1:1 pixel scale
-    display.setCursor(0, 20); // Start at top-left corner
-    int po = (progress * 100) / total;
-    display.print("  ");
-    display.print(po);
-    display.print("%");
-    display.display();
-  });
-  ArduinoOTA.onError([](ota_error_t error) {
-    display.clearDisplay();
-    display.setTextSize(2);   // Normal 1:1 pixel scale
-    display.setCursor(0, 16); // Start at top-left corner
-    display.print("ERROR");
-    display.display();
-  });
 
   temp.begin();
   temp.setWaitForConversion(false); // makes it async
-  ArduinoOTA.begin();
 
   buttonminus.attachClick(DecreaseClick);
   buttonplus.attachClick(IncreaseClick);
@@ -381,13 +307,13 @@ void onoffheater(bool on)
     {
       digitalWrite(RELAYPIN, LOW);
       heater = true;
-      mqttClient.publish(action_topic, 0, false, "heating");
+      mqttClient.Publish(action_topic, 0, false, "heating");
     }
     else
     {
       digitalWrite(RELAYPIN, HIGH);
       heater = false;
-      mqttClient.publish(action_topic, 0, false, "idle");
+      mqttClient.Publish(action_topic, 0, false, "idle");
     }
   }
 }
@@ -400,10 +326,10 @@ void Setonoff(bool on, bool sync)
     {
       onoff = true;
       checktemp.restart();
-      mqttClient.publish(mode_state_topic, 0, true, "heat");
+      mqttClient.Publish(mode_state_topic, 0, true, "heat");
       if (SYNC_ENABLE == 1 && sync)
       {
-        mqttClient.publish(SYNC_mode_command_topic, 0, false, "heat");
+        mqttClient.Publish(SYNC_mode_command_topic, 0, false, "heat");
       }
     }
     else
@@ -412,11 +338,11 @@ void Setonoff(bool on, bool sync)
       onoff = false;
       checktemp.restart();
       checktemp.stop();
-      mqttClient.publish(action_topic, 0, true, "off");
-      mqttClient.publish(mode_state_topic, 0, true, "off");
+      mqttClient.Publish(action_topic, 0, true, "off");
+      mqttClient.Publish(mode_state_topic, 0, true, "off");
       if (SYNC_ENABLE == 1 && sync)
       {
-        mqttClient.publish(SYNC_mode_command_topic, 0, false, "off");
+        mqttClient.Publish(SYNC_mode_command_topic, 0, false, "off");
       }
     }
     EEPROM.write(0, onoff);
@@ -433,7 +359,7 @@ void changetemp(float t, bool sync)
       set_atemp = t;
       char temperature[10];
       dtostrf(set_atemp, 4, 1, temperature);
-      mqttClient.publish(temperature_state_topic, 0, true, temperature);
+      mqttClient.Publish(temperature_state_topic, 0, true, temperature);
       EEPROM.write(1, away);
       int atempb = set_atemp * 10;
       EEPROM.write(2, highByte(atempb));
@@ -441,7 +367,7 @@ void changetemp(float t, bool sync)
       EEPROM.commit();
       if (SYNC_ENABLE == 1 && sync)
       {
-        mqttClient.publish(SYNC_temperature_command_topic, 0, false, temperature);
+        mqttClient.Publish(SYNC_temperature_command_topic, 0, false, temperature);
       }
     }
   }
@@ -452,14 +378,14 @@ void changetemp(float t, bool sync)
       set_temp = t;
       char temperature[10];
       dtostrf(set_temp, 4, 1, temperature);
-      mqttClient.publish(temperature_state_topic, 0, true, temperature);
+      mqttClient.Publish(temperature_state_topic, 0, true, temperature);
       int tempb = set_temp * 10;
       EEPROM.write(4, highByte(tempb));
       EEPROM.write(5, lowByte(tempb));
       EEPROM.commit();
       if (SYNC_ENABLE == 1 && sync)
       {
-        mqttClient.publish(SYNC_temperature_command_topic, 0, false, temperature);
+        mqttClient.Publish(SYNC_temperature_command_topic, 0, false, temperature);
       }
     }
   }
@@ -474,22 +400,22 @@ void setAway(bool on, bool sync)
     {
       char temperature[10];
       dtostrf(set_atemp, 4, 1, temperature);
-      mqttClient.publish(temperature_state_topic, 0, true, temperature);
-      mqttClient.publish(away_mode_state_topic, 0, true, "ON");
+      mqttClient.Publish(temperature_state_topic, 0, true, temperature);
+      mqttClient.Publish(away_mode_state_topic, 0, true, "ON");
       if (SYNC_ENABLE == 1 && sync)
       {
-        mqttClient.publish(SYNC_away_mode_command_topic, 0, false, "ON");
+        mqttClient.Publish(SYNC_away_mode_command_topic, 0, false, "ON");
       }
     }
     else
     {
       char temperature[10];
       dtostrf(set_temp, 4, 1, temperature);
-      mqttClient.publish(temperature_state_topic, 0, true, temperature);
-      mqttClient.publish(away_mode_state_topic, 0, true, "OFF");
+      mqttClient.Publish(temperature_state_topic, 0, true, temperature);
+      mqttClient.Publish(away_mode_state_topic, 0, true, "OFF");
       if (SYNC_ENABLE == 1 && sync)
       {
-        mqttClient.publish(SYNC_away_mode_command_topic, 0, false, "OFF");
+        mqttClient.Publish(SYNC_away_mode_command_topic, 0, false, "OFF");
       }
     }
     EEPROM.write(1, away);
@@ -535,36 +461,36 @@ void sendData() //Sends all the data to the mqtt broker
   {
     char temperature[10];
     dtostrf(set_atemp, 4, 1, temperature);
-    mqttClient.publish(temperature_state_topic, 0, true, temperature);
-    mqttClient.publish(away_mode_state_topic, 0, true, "ON");
+    mqttClient.Publish(temperature_state_topic, 0, true, temperature);
+    mqttClient.Publish(away_mode_state_topic, 0, true, "ON");
   }
   else
   {
     char temperature[10];
     dtostrf(set_temp, 4, 1, temperature);
-    mqttClient.publish(temperature_state_topic, 0, true, temperature);
-    mqttClient.publish(away_mode_state_topic, 0, true, "OFF");
+    mqttClient.Publish(temperature_state_topic, 0, true, temperature);
+    mqttClient.Publish(away_mode_state_topic, 0, true, "OFF");
   }
   if (onoff)
   {
-    mqttClient.publish(mode_state_topic, 0, true, "heat");
+    mqttClient.Publish(mode_state_topic, 0, true, "heat");
     if (heater)
     {
-      mqttClient.publish(action_topic, 0, false, "heating");
+      mqttClient.Publish(action_topic, 0, false, "heating");
     }
     else
     {
-      mqttClient.publish(action_topic, 0, false, "idle");
+      mqttClient.Publish(action_topic, 0, false, "idle");
     }
   }
   else
   {
-    mqttClient.publish(action_topic, 0, true, "off");
-    mqttClient.publish(mode_state_topic, 0, true, "off");
+    mqttClient.Publish(action_topic, 0, true, "off");
+    mqttClient.Publish(mode_state_topic, 0, true, "off");
   }
   char temperature[10];
   dtostrf(current_temp, 4, 1, temperature);
-  mqttClient.publish(current_temperature_topic, 0, false, temperature);
+  mqttClient.Publish(current_temperature_topic, 0, false, temperature);
 }
 
 void loop()
@@ -574,12 +500,12 @@ void loop()
   current_temp = temp.getTempCByIndex(0);
   handleheater();
   refresholed();
-  ArduinoOTA.handle();
+  mqttClient.NetworkLoop();
   if (sendtemp.hasPassed(UPDATETEMPI))
   {
     char temperature[10];
     dtostrf(current_temp, 4, 1, temperature);
-    mqttClient.publish(current_temperature_topic, 0, false, temperature);
+    mqttClient.Publish(current_temperature_topic, 0, false, temperature);
 
     sendtemp.restart();
   }
@@ -633,7 +559,7 @@ void refresholed()
     {
       display.drawBitmap(75, 4, casa, 8, 8, WHITE);
     }
-    if (mqttClient.connected())
+    if (mqttClient.IsMqttConnected())
     {
       display.setCursor(93, 5);
       display.println("#");
