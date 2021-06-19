@@ -9,7 +9,7 @@ It uses a tiny i2c oled to display the current state.
 - Physical control with 3 buttons
 - Control throught mqtt 
 - The mqtt topics and payloads are compatible with home assistant
-- Sync feature (So you can have multiple heaters in one room and control them)
+- Sync feature (So you can have multiple heaters in one room and control them as if they were one)
 
 ## Parts:
 
