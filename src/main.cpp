@@ -138,10 +138,6 @@ void HoldPower()
 
 void onMqttConnect()
 {
-  Serial.println("Connected to MQTT.");
-  Serial.print("Session present: ");
-
-  mqttClient.Publish(STATUS_TOPIC, 0, true, "online");
   sendtemp.restart();
   sendData();
   mqttClient.Subscribe(mode_command_topic, 0);
@@ -266,14 +262,10 @@ void setup()
   display.display();
   Serial.println("Booting");
 
-  WiFi.mode(WIFI_STA);
-  WiFi.hostname(NAME);
-
   mqttClient.SetOnMqttConnect(onMqttConnect);
   mqttClient.SetOnMqttMessage(onMqttMessage);
   mqttClient.SetOnOtaEvent(onOtaevent);
   mqttClient.Init();
-
 
   temp.begin();
   temp.setWaitForConversion(false); // makes it async
