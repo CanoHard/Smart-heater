@@ -195,7 +195,7 @@ void onMqttMessage(char *topic, char *payload, AsyncMqttClientMessageProperties 
   }
   if (topicStr == away_mode_command_topic)
   {
-    if (msj == "ON")
+    if (msj == "away")
     {
       setAway(true, false);
     }
@@ -393,10 +393,10 @@ void setAway(bool on, bool sync)
       char temperature[10];
       dtostrf(set_atemp, 4, 1, temperature);
       mqttClient.Publish(temperature_state_topic, 0, true, temperature);
-      mqttClient.Publish(away_mode_state_topic, 0, true, "ON");
+      mqttClient.Publish(away_mode_state_topic, 0, true, "away");
       if (SYNC_ENABLE == 1 && sync)
       {
-        mqttClient.Publish(SYNC_away_mode_command_topic, 0, false, "ON");
+        mqttClient.Publish(SYNC_away_mode_command_topic, 0, false, "away");
       }
     }
     else
@@ -404,10 +404,10 @@ void setAway(bool on, bool sync)
       char temperature[10];
       dtostrf(set_temp, 4, 1, temperature);
       mqttClient.Publish(temperature_state_topic, 0, true, temperature);
-      mqttClient.Publish(away_mode_state_topic, 0, true, "OFF");
+      mqttClient.Publish(away_mode_state_topic, 0, true, "home");
       if (SYNC_ENABLE == 1 && sync)
       {
-        mqttClient.Publish(SYNC_away_mode_command_topic, 0, false, "OFF");
+        mqttClient.Publish(SYNC_away_mode_command_topic, 0, false, "home");
       }
     }
     EEPROM.write(1, away);
