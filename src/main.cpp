@@ -454,14 +454,14 @@ void sendData() //Sends all the data to the mqtt broker
     char temperature[10];
     dtostrf(set_atemp, 4, 1, temperature);
     mqttClient.Publish(temperature_state_topic, 0, true, temperature);
-    mqttClient.Publish(away_mode_state_topic, 0, true, "ON");
+    mqttClient.Publish(away_mode_state_topic, 0, true, "away");
   }
   else
   {
     char temperature[10];
     dtostrf(set_temp, 4, 1, temperature);
     mqttClient.Publish(temperature_state_topic, 0, true, temperature);
-    mqttClient.Publish(away_mode_state_topic, 0, true, "OFF");
+    mqttClient.Publish(away_mode_state_topic, 0, true, "home");
   }
   if (onoff)
   {
